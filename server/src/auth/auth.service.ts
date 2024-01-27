@@ -16,9 +16,7 @@ export class AuthService {
         private userService: UserService,
         private jwtService: JwtService,
 		@InjectModel(Token.name) private tokenModel: Model<TokenDocument>
-    ) {
-		this.tokenModel.createIndexes({ expireAfterSeconds: 0 })
-	}
+    ) {}
 
     async register({username, email, password}: CreateUserDto) {
         const candidate = await this.userService.findByEmail(email)
@@ -29,9 +27,7 @@ export class AuthService {
         const hash = await bcrypt.hash(password, 3)
         const user = await this.userService.create({username, email, password: hash})
         const tokens = await this.generateTokens(user)
-		const _id = (await this.saveToken(tokens.refreshToken))._id
-		user.$set('tokens', [_id])
-		await user.save()
+		await this.saveToken(tokens.refreshToken)
 
         return tokens
     }
@@ -46,9 +42,7 @@ export class AuthService {
 		}
 
 		const tokens = await this.generateTokens(user)
-		const _id = (await this.saveToken(tokens.refreshToken))._id
-		user.$set('tokens', [...user.tokens ,_id])
-		await user.save()
+		await this.saveToken(tokens.refreshToken)
 
 		return tokens
     }
@@ -61,20 +55,15 @@ export class AuthService {
 		const user = await this.validateRefreshToken(refreshToken)
 		const tokens = await this.generateTokens(user)
 		const token = await this.findToken(refreshToken)
-		token.$set('refreshToken', tokens.refreshToken)
-		await token.save()
+		token.refreshToken = tokens.refreshToken;
+		token.expiresAt = new Date(Date.now() + (60000 * +process.env.JWT_REFRESH_TTL));
+		await token.save();
+
 		return tokens
     }
 
     async logout(refreshToken: string) {
-		const userData = await this.validateRefreshToken(refreshToken)
-		const user = await this.userService.findByEmail(userData.email)
-		const _id = (await this.tokenModel.findOneAndDelete({refreshToken}))._id
-
-		user.$set('tokens', user.tokens.filter(id => _id.toString() !== id.toString()))
-		await user.save()
-
-		return _id
+		return this.tokenModel.findOneAndDelete({refreshToken});
     }
 
 	private async findToken(refreshToken: string) {
@@ -96,7 +85,8 @@ export class AuthService {
     }
 
 	private async saveToken(refreshToken: string) {
-		return this.tokenModel.create({refreshToken, expiresAt: new Date(Date.now() + (60000 * +process.env.JWT_REFRESH_TTL))})
+		const expiresAt = new Date(Date.now() + (60000 * +process.env.JWT_REFRESH_TTL))
+		return this.tokenModel.create({refreshToken, expiresAt})
 	}
 
 	private async validateRefreshToken(refreshToken: string) {
